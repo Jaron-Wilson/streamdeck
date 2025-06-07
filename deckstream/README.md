@@ -1,5 +1,9 @@
-Pygame (for the graphical interface):
+```bash
+pip install pygame pyserial pyautogui
+```
+Or seperate:
 
+Pygame (for the graphical interface):
 ```Bash
 pip install pygame
 ```
