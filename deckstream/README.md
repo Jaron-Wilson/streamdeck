@@ -1,5 +1,5 @@
 ```bash
-pip install pygame pyserial pyautogui
+pip install pygame pyserial pyautogui pywin32 psutil
 ```
 Or seperate:
 
@@ -16,3 +16,6 @@ pyautogui (for controlling the keyboard to type text and press hotkeys):
 pip install pyautogui
 ```
 The other libraries used in the script (like tkinter, json, os, threading, etc.) are part of Python's standard library, so you don't need to install them.
+```bash
+pip install pywin32 psutil
+```
