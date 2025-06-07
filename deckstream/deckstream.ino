@@ -1,41 +1,40 @@
 /*
-  ESP32-WROOM-32D Script for Python Communication (v2)
+  ESP32-WROOM-32D Script for Python Communication (v3 - Remapped)
 
   This script detects button presses and holds, then sends a clean,
   machine-readable command over USB serial to the listening Python script.
 
   *** LOGIC FIX ***
-  - The state machine has been rewritten to be more robust.
-  - Releasing a button after a "HOLD" event has been sent will no longer
-    also send a "PRESS" event. The actions are now mutually exclusive.
+  - The button mapping has been updated to match user's preferred layout.
+  - The state machine prevents a "PRESS" event from firing after a "HOLD".
 
-  How it works:
-  - The baud rate is set to 9600 to match the Python script.
-  - A clean state machine determines if an action is a PRESS or a HOLD.
-    - A PRESS command is only sent if the button is released before the hold time.
-    - A HOLD command is sent once the hold time is exceeded.
-  - The Python script receives either "BUTTON_X_PRESS" or "BUTTON_X_HOLD".
-
-  Button Mapping:
-  - Button 1: D15 (GPIO 15)
-  - Button 2: D4  (GPIO 4)
-  - Button 3: D18 (GPIO 18)
-  - Button 4: D12 (GPIO 12)
-  - Button 5: D27 (GPIO 27)
-  - Button 6: D23 (GPIO 23)
-  - Button 7: D25 (GPIO 25)
-  - Button 8: D32 (GPIO 32)
-  - Button 9: D17 (GPIO 17)
+  New Button Mapping:
+  - UI Button 1 -> Physical Pin 17 (Your old button 9)
+  - UI Button 2 -> Physical Pin 32 (Your old button 8)
+  - UI Button 3 -> Physical Pin 25 (Your old button 7)
+  - UI Button 4 -> Physical Pin 23 (Your old button 6)
+  - UI Button 5 -> Physical Pin 27 (Your old button 5)
+  - UI Button 6 -> Physical Pin 12 (Your old button 4)
+  - UI Button 7 -> Physical Pin 18 (Your old button 3)
+  - UI Button 8 -> Physical Pin 4  (Your old button 2)
+  - UI Button 9 -> Physical Pin 15 (Your old button 1)
 */
 
 // --- Configuration ---
 const int NUM_BUTTONS = 9;
-const unsigned long debounceTime = 50;  // Debounce not explicitly used in new FSM, but good to keep
-const unsigned long holdTime = 1000;   // 1000 milliseconds (1 second) to trigger a hold
+const unsigned long holdTime = 1000;   // 1 second to trigger a hold
 
-// --- Button Pin Definitions ---
+// --- Button Pin Definitions (Remapped) ---
 const int buttonPins[NUM_BUTTONS] = {
-  15, 4, 18, 12, 27, 23, 25, 32, 17
+  17, // Button 1
+  32, // Button 2
+  25, // Button 3
+  23, // Button 4
+  27, // Button 5
+  12, // Button 6
+  18, // Button 7
+  4,  // Button 8
+  15  // Button 9
 };
 
 // --- State Machine Variables ---
@@ -65,7 +64,7 @@ void loop() {
   }
 }
 
-// The new, more robust state machine logic
+// The robust state machine logic
 void updateButtonState(int i) {
   byte currentState = digitalRead(buttonPins[i]);
 
