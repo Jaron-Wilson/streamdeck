@@ -57,7 +57,7 @@ def init_pygame():
         SMALL_FONT = pygame.font.SysFont(None, 18)
         TITLE_FONT = pygame.font.SysFont(None, 26)
     SCREEN = pygame.display.set_mode((460, 560))
-    pygame.display.set_caption("ConsoleDeck v9 (Final)")
+    pygame.display.set_caption("ConsoleDeck v10 (Open With)")
 
 def load_config():
     """Loads or creates the configuration file with the profile structure."""
@@ -67,12 +67,10 @@ def load_config():
             try:
                 CONFIG = json.load(f)
             except json.JSONDecodeError:
-                print("Error: config.json is corrupted. Creating a new one.", flush=True)
-                CONFIG = {} # Reset config
+                CONFIG = {}
     else:
         CONFIG = {}
 
-    # Ensure the base structure is valid
     if "settings" not in CONFIG or not isinstance(CONFIG["settings"], dict):
         CONFIG["settings"] = {"arduino_port": "COM4", "active_profile": "Default", "automation_enabled": True}
     if "profiles" not in CONFIG or not isinstance(CONFIG["profiles"], dict):
@@ -84,7 +82,6 @@ def load_config():
     
     CONFIG["settings"].setdefault("automation_enabled", True)
     
-    # Ensure a valid active profile is set
     profile_keys = list(CONFIG["profiles"].keys())
     active_profile = CONFIG["settings"].get("active_profile", profile_keys[0])
     if active_profile not in profile_keys:
@@ -93,13 +90,11 @@ def load_config():
     ACTIVE_PROFILE_NAME = active_profile
     CONFIG["settings"]["active_profile"] = active_profile
     
-    # Ensure all button keys exist for all profiles to prevent crashes
     for profile_name in CONFIG["profiles"]:
         for i in range(1, 10):
             for action in ["PRESS", "HOLD"]:
                 key = f"BUTTON_{i}_{action}"
-                if key not in CONFIG["profiles"][profile_name]:
-                    CONFIG["profiles"][profile_name][key] = {"type": "none", "value": ""}
+                CONFIG["profiles"][profile_name].setdefault(key, {"type": "none", "value": ""})
 
     ARDUINO_PORT = CONFIG["settings"].get("arduino_port", "COM4")
     print(f"[DEBUG] Config loaded. Active profile: '{ACTIVE_PROFILE_NAME}', Port: {ARDUINO_PORT}", flush=True)
@@ -113,9 +108,16 @@ def save_config():
 def execute_action(action):
     """Executes a single action or a sequence of actions (macro)."""
     global ACTIVE_PROFILE_NAME
-    action_type = action.get("type", "none")
-    value = action.get("value", "")
-
+    action_type = action.get("type", "none"); value = action.get("value", "")
+    if action_type == "open_with":
+        try:
+            app_path, arg_path = value.split('|', 1)
+            if os.path.exists(app_path) and os.path.exists(arg_path):
+                print(f"Action: Opening '{arg_path}' with '{os.path.basename(app_path)}'", flush=True)
+                subprocess.Popen([app_path, arg_path])
+            else: print(f"Error: Path not found for open_with. App: {app_path}, Arg: {arg_path}", flush=True)
+        except (ValueError, IndexError): print(f"Error: Malformed value for open_with: {value}", flush=True)
+        return
     if action_type == "switch_profile":
         profile_names = list(CONFIG["profiles"].keys())
         if not profile_names: return
@@ -124,53 +126,127 @@ def execute_action(action):
             next_index = (current_index + 1) % len(profile_names)
             ACTIVE_PROFILE_NAME = profile_names[next_index]
             CONFIG["settings"]["active_profile"] = ACTIVE_PROFILE_NAME
-            save_config()
-            print(f"Action: Switched to profile '{ACTIVE_PROFILE_NAME}'", flush=True)
-        except (ValueError, IndexError):
-            print("Error: Could not switch profile.", flush=True)
+            save_config(); print(f"Action: Switched to profile '{ACTIVE_PROFILE_NAME}'", flush=True)
+        except (ValueError, IndexError): print("Error: Could not switch profile.", flush=True)
         return
-
     if action_type == "macro":
         print(f"Action: Executing macro with {len(value)} steps...", flush=True)
-        for step in value:
-            execute_action(step)
-            time.sleep(0.05)
+        for step in value: execute_action(step); time.sleep(0.05)
         return
-
     if action_type == "delay":
         try:
-            delay_seconds = int(value) / 1000.0
-            print(f"Action: Delaying for {delay_seconds} seconds...", flush=True)
-            time.sleep(delay_seconds)
-        except (ValueError, TypeError):
-            print(f"Error: Invalid delay value '{value}'.", flush=True)
+            delay_seconds = int(value) / 1000.0; print(f"Action: Delaying for {delay_seconds} seconds...", flush=True); time.sleep(delay_seconds)
+        except (ValueError, TypeError): print(f"Error: Invalid delay value '{value}'.", flush=True)
         return
-
     if action_type == "link":
-        try:
-            webbrowser.open(value)
-            print(f"Action: Opening link: {value}", flush=True)
-        except Exception as e:
-            print(f"Error opening link '{value}': {e}", flush=True)
+        try: webbrowser.open(value); print(f"Action: Opening link: {value}", flush=True)
+        except Exception as e: print(f"Error opening link '{value}': {e}", flush=True)
     elif action_type == "exe":
-        try:
-            subprocess.Popen(value)
-            print(f"Action: Running executable: {value}", flush=True)
-        except Exception as e:
-            print(f"Error running executable '{value}': {e}", flush=True)
+        try: subprocess.Popen(value); print(f"Action: Running executable: {value}", flush=True)
+        except Exception as e: print(f"Error running executable '{value}': {e}", flush=True)
     elif action_type == "keystroke":
-        try:
-            keys = [k.strip() for k in value.lower().split('+')]
-            print(f"Action: Pressing hotkey: {keys}", flush=True)
-            pyautogui.hotkey(*keys)
-        except Exception as e:
-            print(f"Error pressing hotkey '{value}': {e}", flush=True)
+        try: keys = [k.strip() for k in value.lower().split('+')]; print(f"Action: Pressing hotkey: {keys}", flush=True); pyautogui.hotkey(*keys)
+        except Exception as e: print(f"Error pressing hotkey '{value}': {e}", flush=True)
     elif action_type == "typetext":
+        try: print(f"Action: Typing text: {value}", flush=True); pyautogui.write(value, interval=0.01)
+        except Exception as e: print(f"Error typing text: {e}", flush=True)
+
+def configure_button(button_number):
+    """Opens a Tkinter window to configure button actions for the active profile."""
+    global CONFIG, ACTIVE_PROFILE_NAME
+    active_profile_data = CONFIG["profiles"][ACTIVE_PROFILE_NAME]
+    root = tk.Tk(); root.title(f"Configure Button {button_number} ({ACTIVE_PROFILE_NAME})"); root.attributes('-topmost', True)
+    
+    def create_action_frame(parent, title, action_key):
+        frame = ttk.LabelFrame(parent, text=title, padding=(10, 5)); frame.pack(fill="x", expand=True, padx=10, pady=5)
+        action_config = active_profile_data.get(action_key, {"type": "none", "value": ""})
+        choice_var = tk.StringVar(value=action_config["type"])
+        
+        ui_vars = {
+            "value": tk.StringVar(value=action_config.get("value", "")),
+            "ctrl": tk.BooleanVar(), "alt": tk.BooleanVar(), "shift": tk.BooleanVar(),
+            "main_key": tk.StringVar(), "macro_text": None,
+            "app_path": tk.StringVar(), "arg_path": tk.StringVar()
+        }
+
+        def update_widgets(*args):
+            for widget in frame.winfo_children():
+                if not isinstance(widget, (ttk.Combobox, tk.Label)): widget.destroy()
+            action_type = choice_var.get()
+            
+            if action_type in ["link", "typetext", "delay", "exe"]:
+                entry = ttk.Entry(frame, width=40, textvariable=ui_vars["value"]); entry.pack(pady=5)
+                if action_type == "exe":
+                    def choose_file():
+                        path = filedialog.askopenfilename(title="Select Executable", filetypes=[("Executables", "*.exe"), ("All files", "*.*")])
+                        if path: ui_vars["value"].set(path)
+                    ttk.Button(frame, text="Choose .exe File", command=choose_file).pack()
+            
+            elif action_type == "open_with":
+                app_frame = ttk.Frame(frame); app_frame.pack(fill="x", pady=2)
+                ttk.Label(app_frame, text="Application:").pack(side="left")
+                ttk.Entry(app_frame, width=30, textvariable=ui_vars["app_path"]).pack(side="left", expand=True, fill="x")
+                def choose_app(): ui_vars["app_path"].set(filedialog.askopenfilename(title="Select Application"))
+                ttk.Button(app_frame, text="...", width=3, command=choose_app).pack(side="left")
+                arg_frame = ttk.Frame(frame); arg_frame.pack(fill="x", pady=2)
+                ttk.Label(arg_frame, text="Project/File:").pack(side="left")
+                ttk.Entry(arg_frame, width=30, textvariable=ui_vars["arg_path"]).pack(side="left", expand=True, fill="x")
+                def choose_arg(): ui_vars["arg_path"].set(filedialog.askdirectory(title="Select Project Folder"))
+                ttk.Button(arg_frame, text="...", width=3, command=choose_arg).pack(side="left")
+                saved_value = action_config.get("value", "")
+                if '|' in saved_value:
+                    app_p, arg_p = saved_value.split('|', 1)
+                    ui_vars["app_path"].set(app_p); ui_vars["arg_path"].set(arg_p)
+
+            elif action_type == "keystroke":
+                keystroke_frame = ttk.Frame(frame); keystroke_frame.pack(pady=5)
+                ttk.Checkbutton(keystroke_frame, text="Ctrl", variable=ui_vars["ctrl"]).pack(side="left"); ttk.Checkbutton(keystroke_frame, text="Alt", variable=ui_vars["alt"]).pack(side="left"); ttk.Checkbutton(keystroke_frame, text="Shift", variable=ui_vars["shift"]).pack(side="left")
+                ttk.Label(keystroke_frame, text="  Key:").pack(side="left"); ttk.Entry(keystroke_frame, width=10, textvariable=ui_vars["main_key"]).pack(side="left", padx=5)
+                hotkey_str = action_config.get("value", ""); saved_hotkey = hotkey_str.lower().split('+'); modifiers = {m for m in saved_hotkey if m in ["ctrl", "alt", "shift"]}; main_key = [k for k in saved_hotkey if k not in modifiers]
+                ui_vars["ctrl"].set("ctrl" in modifiers); ui_vars["alt"].set("alt" in modifiers); ui_vars["shift"].set("shift" in modifiers); ui_vars["main_key"].set(main_key[0] if main_key else "")
+
+            elif action_type == "macro":
+                ui_vars["macro_text"] = tk.Text(frame, height=8, width=50, relief=tk.SOLID, borderwidth=1); ui_vars["macro_text"].pack(pady=(5,0))
+                def copy_example(): ui_vars["macro_text"].delete("1.0", tk.END); ui_vars["macro_text"].insert("1.0", "# One action per line. Format is type:value\nkeystroke:alt+tab\ndelay:500\nkeystroke:ctrl+a")
+                ttk.Button(frame, text="Copy Example to Editor", command=copy_example).pack(pady=(5,5))
+                value = action_config.get("value", [])
+                if isinstance(value, list) and value: ui_vars["macro_text"].insert("1.0", "\n".join([f"{step['type']}:{step['value']}" for step in value]))
+
+            elif action_type == "switch_profile": ttk.Label(frame, text="This action cycles to the next profile.").pack(pady=5)
+
+        dropdown = ttk.Combobox(frame, textvariable=choice_var, values=["none", "link", "exe", "open_with", "keystroke", "typetext", "macro", "switch_profile", "delay"], state="readonly")
+        dropdown.pack(side="left", padx=5); tk.Label(frame, text="Action Type:").pack(side="left", padx=5); dropdown.bind("<<ComboboxSelected>>", update_widgets); update_widgets()
+        
+        def get_value():
+            action_type = choice_var.get()
+            if action_type == "open_with": return f"{ui_vars['app_path'].get()}|{ui_vars['arg_path'].get()}"
+            if action_type == "keystroke": parts = []; [parts.append(m) for m,v in [("ctrl",ui_vars["ctrl"]),("alt",ui_vars["alt"]),("shift",ui_vars["shift"])] if v.get()]; parts.append(ui_vars["main_key"].get().strip().lower()); return "+".join(p for p in parts if p)
+            if action_type == "macro" and ui_vars["macro_text"]: return [{"type": t.strip(), "value": v.strip()} for t,v in [l.split(":",1) for l in ui_vars["macro_text"].get("1.0", tk.END).strip().splitlines() if l.strip() and not l.strip().startswith("#") and ":" in l]]
+            if action_type == "switch_profile": return "next"
+            return ui_vars["value"].get()
+        return choice_var, get_value
+    
+    press_choice, get_press_value = create_action_frame(root, "Press Action", f"BUTTON_{button_number}_PRESS")
+    hold_choice, get_hold_value = create_action_frame(root, "Hold Action", f"BUTTON_{button_number}_HOLD")
+    def on_save(): active_profile_data[f"BUTTON_{button_number}_PRESS"] = {"type": press_choice.get(), "value": get_press_value()}; active_profile_data[f"BUTTON_{button_number}_HOLD"] = {"type": hold_choice.get(), "value": get_hold_value()}; save_config(); root.destroy()
+    ttk.Button(root, text="Save and Close", command=on_save).pack(pady=20)
+    root.mainloop()
+
+def get_button_text(action):
+    """Formats the button action text for display."""
+    action_type = action.get("type", "none"); value = action.get("value", "")
+    if action_type == "open_with":
         try:
-            print(f"Action: Typing text: {value}", flush=True)
-            pyautogui.write(value, interval=0.01)
-        except Exception as e:
-            print(f"Error typing text: {e}", flush=True)
+            app_path, _ = value.split('|', 1)
+            app_name = os.path.basename(app_path)
+            if len(app_name) > 12: app_name = app_name[:9] + "..."
+            return f"Open with {app_name}"
+        except: return "Open with..."
+    if action_type == "macro": return f"Macro: {len(value) if isinstance(value, list) else 0} steps"
+    elif action_type == "exe": value = os.path.basename(value) if value else "N/A"
+    elif action_type == "switch_profile": return "Switch Profile"
+    if isinstance(value, str) and len(value) > 15: value = value[:12] + "..."
+    return f"{action_type}: {value}"
 
 def manage_profiles():
     """Opens a Tkinter window to manage all profile settings."""
@@ -255,131 +331,8 @@ def manage_profiles():
         ttk.Button(automation_frame, text="Delete Selected Mapping", command=delete_mapping).pack()
     root.mainloop()
 
-def configure_button(button_number):
-    """Opens a Tkinter window to configure button actions for the active profile."""
-    global CONFIG, ACTIVE_PROFILE_NAME
-    active_profile_data = CONFIG["profiles"][ACTIVE_PROFILE_NAME]
-    
-    root = tk.Tk()
-    root.title(f"Configure Button {button_number} ({ACTIVE_PROFILE_NAME})")
-    root.attributes('-topmost', True)
-    
-    def create_action_frame(parent, title, action_key):
-        frame = ttk.LabelFrame(parent, text=title, padding=(10, 5))
-        frame.pack(fill="x", expand=True, padx=10, pady=5)
-        
-        action_config = active_profile_data.get(action_key, {"type": "none", "value": ""})
-        choice_var = tk.StringVar(value=action_config["type"])
-        
-        simple_value_var = tk.StringVar()
-        ctrl_var, alt_var, shift_var = tk.BooleanVar(), tk.BooleanVar(), tk.BooleanVar()
-        main_key_var = tk.StringVar()
-        macro_text_widget = None
-
-        def update_widgets(*args):
-            nonlocal macro_text_widget
-            for widget in frame.winfo_children():
-                if not isinstance(widget, (ttk.Combobox, tk.Label)):
-                    widget.destroy()
-            
-            action_type = choice_var.get()
-
-            if action_type in ["link", "typetext", "delay", "exe"]:
-                simple_value_var.set(action_config.get("value", ""))
-                entry = ttk.Entry(frame, width=40, textvariable=simple_value_var)
-                entry.pack(pady=5)
-                if action_type == "exe":
-                    def choose_file():
-                        path = filedialog.askopenfilename(title="Select Executable", filetypes=[("Executables", "*.exe"), ("All files", "*.*")])
-                        if path: simple_value_var.set(path)
-                    ttk.Button(frame, text="Choose .exe File", command=choose_file).pack()
-            
-            elif action_type == "keystroke":
-                keystroke_frame = ttk.Frame(frame); keystroke_frame.pack(pady=5)
-                ttk.Checkbutton(keystroke_frame, text="Ctrl", variable=ctrl_var).pack(side="left")
-                ttk.Checkbutton(keystroke_frame, text="Alt", variable=alt_var).pack(side="left")
-                ttk.Checkbutton(keystroke_frame, text="Shift", variable=shift_var).pack(side="left")
-                ttk.Label(keystroke_frame, text="  Key:").pack(side="left")
-                ttk.Entry(keystroke_frame, width=10, textvariable=main_key_var).pack(side="left", padx=5)
-                
-                hotkey_str = action_config.get("value", "")
-                saved_hotkey = hotkey_str.lower().split('+')
-                modifiers = {m for m in saved_hotkey if m in ["ctrl", "alt", "shift"]}
-                main_key = [k for k in saved_hotkey if k not in modifiers]
-                ctrl_var.set("ctrl" in modifiers)
-                alt_var.set("alt" in modifiers)
-                shift_var.set("shift" in modifiers)
-                main_key_var.set(main_key[0] if main_key else "")
-
-            elif action_type == "macro":
-                macro_text_widget = tk.Text(frame, height=8, width=50, relief=tk.SOLID, borderwidth=1)
-                macro_text_widget.pack(pady=(5,0))
-                def copy_example(): macro_text_widget.delete("1.0", tk.END); macro_text_widget.insert("1.0", "# One action per line. Format is type:value\nkeystroke:alt+tab\ndelay:500\nkeystroke:ctrl+a")
-                ttk.Button(frame, text="Copy Example to Editor", command=copy_example).pack(pady=(5,5))
-                
-                value = action_config.get("value", [])
-                if isinstance(value, list) and value:
-                    macro_string = "\n".join([f"{step['type']}:{step['value']}" for step in value])
-                    macro_text_widget.insert("1.0", macro_string)
-            
-            elif action_type == "switch_profile":
-                ttk.Label(frame, text="This action cycles to the next profile.").pack(pady=5)
-        
-        tk.Label(frame, text="Action Type:").pack(side="left", padx=5)
-        dropdown = ttk.Combobox(frame, textvariable=choice_var, values=["none", "link", "exe", "keystroke", "typetext", "macro", "switch_profile", "delay"], state="readonly")
-        dropdown.pack(side="left", padx=5)
-        dropdown.bind("<<ComboboxSelected>>", update_widgets)
-        
-        update_widgets()
-        
-        def get_value():
-            action_type = choice_var.get()
-            if action_type == "keystroke":
-                parts = []
-                if ctrl_var.get(): parts.append("ctrl")
-                if alt_var.get(): parts.append("alt")
-                if shift_var.get(): parts.append("shift")
-                if main_key_var.get(): parts.append(main_key_var.get().strip().lower())
-                return "+".join(p for p in parts if p)
-            
-            elif action_type == "macro" and macro_text_widget:
-                macro_list = []
-                text_content = macro_text_widget.get("1.0", tk.END).strip()
-                for line in text_content.splitlines():
-                    if line.strip() and not line.strip().startswith("#") and ":" in line:
-                        step_type, step_value = line.split(":", 1)
-                        macro_list.append({"type": step_type.strip(), "value": step_value.strip()})
-                return macro_list
-            
-            elif action_type == "switch_profile":
-                return "next"
-
-            else:
-                return simple_value_var.get()
-
-        return choice_var, get_value
-    
-    press_choice, get_press_value = create_action_frame(root, "Press Action", f"BUTTON_{button_number}_PRESS")
-    hold_choice, get_hold_value = create_action_frame(root, "Hold Action", f"BUTTON_{button_number}_HOLD")
-    
-    def on_save():
-        active_profile_data[f"BUTTON_{button_number}_PRESS"] = {"type": press_choice.get(), "value": get_press_value()}
-        active_profile_data[f"BUTTON_{button_number}_HOLD"] = {"type": hold_choice.get(), "value": get_hold_value()}
-        save_config()
-        root.destroy()
-
-    ttk.Button(root, text="Save and Close", command=on_save).pack(pady=20)
-    root.mainloop()
-
-def get_button_text(action):
-    action_type = action.get("type", "none"); value = action.get("value", "")
-    if action_type == "macro": return f"Macro: {len(value) if isinstance(value, list) else 0} steps"
-    elif action_type == "exe": value = os.path.basename(value) if value else "N/A"
-    elif action_type == "switch_profile": return "Switch Profile"
-    if isinstance(value, str) and len(value) > 15: value = value[:12] + "..."
-    return f"{action_type}: {value}"
-
 def draw_ui():
+    """Draws the entire UI, including buttons and port info."""
     global ACTIVE_PROFILE_NAME, ARDUINO_PORT
     SCREEN.fill(COLOR_BACKGROUND)
     profile_text = TITLE_FONT.render(f"Profile: {ACTIVE_PROFILE_NAME}", True, COLOR_TEXT)
@@ -408,6 +361,7 @@ def draw_ui():
     pygame.display.flip()
 
 def find_click_target(mx, my):
+    """Determines what UI element was clicked."""
     if SCREEN.get_width() // 2 - 70 < mx < SCREEN.get_width() // 2 + 70 and 30 < my < 55: return "profiles", None
     for i in range(9):
         x, y = 20 + (i % 3) * 140, 20 + (i // 3) * 160 + 60
@@ -416,6 +370,7 @@ def find_click_target(mx, my):
     return None, None
 
 def listen_to_serial():
+    """Listens for incoming data from the serial port and executes actions."""
     global RUN_THREADS, CONFIG, LAST_ACTION_TIME
     while RUN_THREADS:
         try:
@@ -435,6 +390,7 @@ def listen_to_serial():
             if RUN_THREADS: time.sleep(5)
 
 def profile_watcher():
+    """Background thread to watch for active window and switch profiles if enabled."""
     global ACTIVE_PROFILE_NAME, RUN_THREADS
     if not AUTOMATION_ENABLED: return
     last_exe = None
@@ -457,6 +413,7 @@ def profile_watcher():
         time.sleep(2)
 
 def restart_threads():
+    """Stops and restarts all background threads."""
     global SERIAL_THREAD, WATCHER_THREAD, RUN_THREADS, ARDUINO_PORT
     if (SERIAL_THREAD and SERIAL_THREAD.is_alive()) or (WATCHER_THREAD and WATCHER_THREAD.is_alive()):
         RUN_THREADS = False; 
@@ -469,6 +426,7 @@ def restart_threads():
     WATCHER_THREAD = threading.Thread(target=profile_watcher, daemon=True); WATCHER_THREAD.start()
 
 def main():
+    """Main application loop."""
     global CONFIG
     load_config(); init_pygame(); restart_threads()
     running = True
